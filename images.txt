@@ -1,1 +1,1 @@
---platform linux/amd64 clickhouse/clickhouse-server:24.10.3-alpine
+--platform linux/amd64 alpine:3.20.3
