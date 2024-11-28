@@ -1,1 +1,1 @@
---platform linux/amd64 postgres:14.15-alpine
+--platform linux/amd64 postgres:14.15
