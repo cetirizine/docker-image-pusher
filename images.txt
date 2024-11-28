@@ -1,1 +1,1 @@
---platform linux/amd64 golang:1.23.3-alpine
+--platform linux/amd64 golang:1.23.3
