@@ -1,1 +1,1 @@
---platform linux/amd64 busybox:1.37.0-glibc
+--platform linux/amd64 busybox:1.37.0-musl
