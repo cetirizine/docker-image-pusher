@@ -1,1 +1,1 @@
---platform linux/amd64 python:3.13.0-alpine3.19
+--platform linux/amd64 python:3.12.7-alpine3.20
