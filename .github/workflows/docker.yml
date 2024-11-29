@@ -22,6 +22,9 @@ jobs:
         echo "$ALIYUN_REGISTRY_PASSWORD" | docker login -u $ALIYUN_REGISTRY_USER --password-stdin $ALIYUN_REGISTRY
         ls -l images.txt
         cat images.txt
+        echo "before reading"
+        a=$(cat images.txt)
+        echo "$a"
         while IFS= read -r line; do
           echo "docker pull $line"
           docker pull $line
@@ -34,3 +37,4 @@ jobs:
           echo "docker push $target_image"
           docker push $target_image
         done < images.txt
+        echo "after reading"
