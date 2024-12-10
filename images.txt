@@ -1,1 +1,1 @@
---platform linux/amd64 busybox:1.37.0-uclibc
+--platform linux/amd64 provectuslabs/kafka-ui:v0.7.2
