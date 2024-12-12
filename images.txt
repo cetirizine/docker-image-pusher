@@ -1,1 +1,1 @@
---platform linux/amd64 confluentinc/cp-server-connect-base:7.8.0
+--platform linux/amd64 confluentinc/cp-kafka:7.8.0
