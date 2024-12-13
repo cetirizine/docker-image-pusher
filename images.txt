@@ -1,1 +1,1 @@
---platform linux/amd64 debezium/connect:2.7.3.Final
+--platform linux/amd64 mongo:8.0.4
