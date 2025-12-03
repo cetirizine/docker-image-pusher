@@ -1,1 +1,1 @@
---platform linux/amd64 bitnamilegacy/pgpool:4.6.3
+--platform linux/amd64 bitnamilegacy/kafka:3.3.2
