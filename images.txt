@@ -1,1 +1,1 @@
---platform linux/amd64 nginx:1.29
+--platform linux/amd64 golang:1.24-alpine
