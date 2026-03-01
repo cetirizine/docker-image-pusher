@@ -10,7 +10,7 @@ env:
   ALIYUN_REGISTRY_PASSWORD: "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
 jobs:
   build:
-    name: Pull-Then-Push
+    name: sync-image
     runs-on: ubuntu-latest
     steps:
     - name: Setup Docker Buildx
@@ -20,15 +20,13 @@ jobs:
     - name: Pull Image Then Push To Aliyun
       run: |
         echo "$ALIYUN_REGISTRY_PASSWORD" | docker login -u $ALIYUN_REGISTRY_USER --password-stdin $ALIYUN_REGISTRY
-        line=$(cat images.txt)
-        echo "docker pull $line"
-        docker pull $line
-        platform=$(echo "$line" | grep -oP '(--platform) \S+' | cut -d' ' -f2)
-        image=$(echo "$line" | awk '{print $NF}')
-        name=$(echo "$image" | awk -F'/' '{print $NF}')
-        target_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$name"
-        echo "docker tag $image $target_image"
-        docker tag $image $target_image
-        echo "docker push $target_image"
-        docker push $target_image
-        echo "$ALIYUN_REGISTRY_PASSWORD"
+        while read -r line; do
+          [ -z "$line" ] && continue
+          echo "Processing image: $line"
+          image="$line"
+          name=$(echo "$image" | awk -F'/' '{print $NF}')
+          target_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$name"
+          echo "→ Creating multi-arch manifest"
+          docker buildx imagetools create --tag "$target_image" "$image"
+          echo "✔ Synced: $target_image"
+        done < images.txt
