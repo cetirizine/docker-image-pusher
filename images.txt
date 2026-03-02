@@ -1,3 +1,1 @@
-redis:8.4.2-alpine
-postgres:14.22-alpine
-kong:3.9.1
+milvusdb/milvus:v2.6.11
