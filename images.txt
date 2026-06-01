@@ -1,1 +1,1 @@
-jeessy/ddns-go:v6.16.10
+milvusdb/milvus:2.6-20260531-7f00e2c1
