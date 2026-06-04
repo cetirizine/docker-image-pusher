@@ -1,1 +1,1 @@
-milvusdb/milvus:2.6-20260531-7f00e2c1
+xhofe/alist:v3.61.0
