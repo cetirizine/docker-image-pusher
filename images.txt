@@ -1,1 +1,1 @@
-gitea/gitea:1.27.3
+registry:3.1.1
