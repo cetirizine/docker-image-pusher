@@ -50,8 +50,13 @@ jobs:
             manifest=$(docker buildx imagetools inspect --raw "$image")
 
             if jq -e '.manifests' >/dev/null <<< "$manifest"; then
-              # 提取真实运行平台，排除 unknown/unknown 和 attestation
-              mapfile -t platforms < <(
+              # 去掉源镜像的 tag/digest，只保留仓库名
+              source_repo="${image%@*}"
+              last_part="${source_repo##*/}"
+              [[ "$last_part" == *:* ]] && source_repo="${source_repo%:*}"
+            
+              # 只选择可运行平台
+              mapfile -t digests < <(
                 jq -r '
                   .manifests[]
                   | select(.platform.os != null)
@@ -62,34 +67,40 @@ jobs:
                       (.annotations["vnd.docker.reference.type"] // "")
                       != "attestation-manifest"
                     )
-                  | .platform.os + "/" + .platform.architecture
-                    + if (.platform.variant // "") != ""
-                      then "/" + .platform.variant
-                      else ""
-                      end
-                ' <<< "$manifest" | sort -u
+                  | .digest
+                ' <<< "$manifest"
               )
-
-              if [ "${#platforms[@]}" -eq 0 ]; then
+            
+              if [ "${#digests[@]}" -eq 0 ]; then
                 echo "ERROR: No runnable platform found: $image"
                 exit 1
               fi
-
-              # 转换为多个 --platform linux/amd64
-              platform_args=()
-              for platform in "${platforms[@]}"; do
+            
+              sources=()
+            
+              for digest in "${digests[@]}"; do
+                platform=$(
+                  jq -r --arg digest "$digest" '
+                    .manifests[]
+                    | select(.digest == $digest)
+                    | .platform.os + "/" + .platform.architecture
+                      + if (.platform.variant // "") != ""
+                        then "/" + .platform.variant
+                        else ""
+                        end
+                  ' <<< "$manifest"
+                )
+            
                 echo "  Keep platform: $platform"
-                platform_args+=(--platform "$platform")
+                sources+=("$source_repo@$digest")
               done
-
+            
+              # 由真实平台 manifest 重新构造多架构索引
               docker buildx imagetools create \
-                "${platform_args[@]}" \
                 --tag "$target" \
-                "$image"
+                "${sources[@]}"
             else
-              # 普通单平台镜像没有 manifests 数组，直接同步
-              echo "  Single-platform image"
-
+              # 普通单平台镜像
               docker buildx imagetools create \
                 --prefer-index=false \
                 --tag "$target" \
