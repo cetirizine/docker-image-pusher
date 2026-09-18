@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   ALIYUN_REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}
   ALIYUN_NAME_SPACE: ${{ secrets.ALIYUN_NAME_SPACE }}
@@ -12,32 +15,28 @@ env:
   ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
 
 jobs:
-  build:
-    name: sync-image
+  sync-image:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Sync Images To Aliyun
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Sync images to Aliyun ACR
         shell: bash
         run: |
-          set -e
+          set -Eeuo pipefail
 
-          echo "$ALIYUN_REGISTRY_PASSWORD" |
-            docker login \
-              -u "$ALIYUN_REGISTRY_USER" \
-              --password-stdin \
-              "$ALIYUN_REGISTRY"
+          echo "$ALIYUN_REGISTRY_PASSWORD" | docker login \
+            --username "$ALIYUN_REGISTRY_USER" \
+            --password-stdin "$ALIYUN_REGISTRY"
 
           while IFS= read -r image || [ -n "$image" ]; do
+            # 兼容 Windows 换行，并跳过空行和注释。
             image="${image%$'\r'}"
-
-            # 跳过空行和注释
             [ -z "$image" ] && continue
             [[ "$image" == \#* ]] && continue
 
@@ -45,66 +44,112 @@ jobs:
             target="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$name"
 
             echo "Processing: $image"
-
-            # 读取源镜像的原始 manifest
             manifest=$(docker buildx imagetools inspect --raw "$image")
 
-            if jq -e '.manifests' >/dev/null <<< "$manifest"; then
-              # 去掉源镜像的 tag/digest，只保留仓库名
-              source_repo="${image%@*}"
-              last_part="${source_repo##*/}"
-              [[ "$last_part" == *:* ]] && source_repo="${source_repo%:*}"
-            
-              # 只选择可运行平台
-              mapfile -t digests < <(
-                jq -r '
-                  .manifests[]
-                  | select(.platform.os != null)
-                  | select(.platform.architecture != null)
-                  | select(.platform.os != "unknown")
-                  | select(.platform.architecture != "unknown")
-                  | select(
-                      (.annotations["vnd.docker.reference.type"] // "")
-                      != "attestation-manifest"
-                    )
-                  | .digest
-                ' <<< "$manifest"
-              )
-            
-              if [ "${#digests[@]}" -eq 0 ]; then
-                echo "ERROR: No runnable platform found: $image"
-                exit 1
-              fi
-            
-              sources=()
-            
-              for digest in "${digests[@]}"; do
-                platform=$(
-                  jq -r --arg digest "$digest" '
-                    .manifests[]
-                    | select(.digest == $digest)
-                    | .platform.os + "/" + .platform.architecture
-                      + if (.platform.variant // "") != ""
-                        then "/" + .platform.variant
-                        else ""
-                        end
-                  ' <<< "$manifest"
-                )
-            
-                echo "  Keep platform: $platform"
-                sources+=("$source_repo@$digest")
-              done
-            
-              # 由真实平台 manifest 重新构造多架构索引
-              docker buildx imagetools create \
-                --tag "$target" \
-                "${sources[@]}"
-            else
-              # 普通单平台镜像
+            if ! jq -e '.manifests' >/dev/null <<< "$manifest"; then
+              # 普通单平台镜像直接同步。
               docker buildx imagetools create \
                 --prefer-index=false \
                 --tag "$target" \
                 "$image"
+
+              echo "Synced: $target"
+              continue
+            fi
+
+            # 去掉源镜像的 tag 或 digest，只保留仓库名。
+            source_repo="${image%@*}"
+            source_last="${source_repo##*/}"
+            [[ "$source_last" == *:* ]] && source_repo="${source_repo%:*}"
+
+            # 拆分目标仓库名和标签；未指定标签时使用 latest。
+            target_last="${target##*/}"
+            if [[ "$target_last" == *:* ]]; then
+              target_repo="${target%:*}"
+              target_tag="${target##*:}"
+            else
+              target_repo="$target"
+              target_tag="latest"
+              target="${target_repo}:${target_tag}"
+            fi
+
+            # 只保留真实运行平台，排除 unknown/unknown 和 attestation。
+            mapfile -t entries < <(
+              jq -r '
+                .manifests[]
+                | select(.platform.os != null)
+                | select(.platform.architecture != null)
+                | select(.platform.os != "unknown")
+                | select(.platform.architecture != "unknown")
+                | select(
+                    (.annotations["vnd.docker.reference.type"] // "")
+                    != "attestation-manifest"
+                  )
+                | [
+                    (
+                      .platform.os + "/" + .platform.architecture
+                      + if (.platform.variant // "") != ""
+                        then "/" + .platform.variant
+                        else ""
+                        end
+                    ),
+                    .digest
+                  ]
+                | @tsv
+              ' <<< "$manifest"
+            )
+
+            if [ "${#entries[@]}" -eq 0 ]; then
+              echo "ERROR: No runnable platform found: $image" >&2
+              exit 1
+            fi
+
+            platform_refs=()
+            platform_names=()
+
+            for entry in "${entries[@]}"; do
+              IFS=$'\t' read -r platform digest <<< "$entry"
+
+              # 例如 linux/arm/v7 使用 arm-v7 作为平台标签后缀。
+              suffix="${platform#*/}"
+              suffix="${suffix//\//-}"
+
+              source_ref="${source_repo}@${digest}"
+              platform_target="${target_repo}:${target_tag}-${suffix}"
+
+              echo "  Copy platform: $platform"
+
+              # Docker Engine 只推送运行镜像，不复制 OCI attestation。
+              docker pull --platform "$platform" "$source_ref"
+              docker tag "$source_ref" "$platform_target"
+              docker push --platform "$platform" "$platform_target"
+
+              platform_refs+=("$platform_target")
+              platform_names+=("$platform")
+            done
+
+            if [ "${#platform_refs[@]}" -eq 1 ]; then
+              # 只有一个真实平台时，直接使用正式标签。
+              docker tag "${platform_refs[0]}" "$target"
+              docker push --platform "${platform_names[0]}" "$target"
+            else
+              # 根据纯单平台镜像重新生成不含 attestation 的 manifest list。
+              docker manifest rm "$target" >/dev/null 2>&1 || true
+              docker manifest create "$target" "${platform_refs[@]}"
+
+              # 明确写入各 manifest 的平台信息，包括 arm variant。
+              for i in "${!platform_refs[@]}"; do
+                IFS='/' read -r os arch variant <<< "${platform_names[$i]}"
+                annotate_args=(--os "$os" --arch "$arch")
+                [ -n "${variant:-}" ] && annotate_args+=(--variant "$variant")
+
+                docker manifest annotate \
+                  "${annotate_args[@]}" \
+                  "$target" \
+                  "${platform_refs[$i]}"
+              done
+
+              docker manifest push --purge "$target"
             fi
 
             echo "Synced: $target"
