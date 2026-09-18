@@ -35,8 +35,6 @@ jobs:
             --password-stdin "$ALIYUN_REGISTRY"
 
           while IFS= read -r image || [ -n "$image" ]; do
-            # 兼容 Windows 换行，并跳过空行和注释。
-            image="${image%$'\r'}"
             [ -z "$image" ] && continue
             [[ "$image" == \#* ]] && continue
 
@@ -44,25 +42,35 @@ jobs:
             target="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$name"
 
             echo "Processing: $image"
+
+            # 优先完整复制
+            if docker buildx imagetools create \
+              --tag "$target" \
+              "$image"
+            then
+              echo "Synced directly: $target"
+              continue
+            fi
+
+            echo "Direct copy failed, switching to compatibility mode"
             manifest=$(docker buildx imagetools inspect --raw "$image")
 
             if ! jq -e '.manifests' >/dev/null <<< "$manifest"; then
-              # 普通单平台镜像直接同步。
-              docker buildx imagetools create \
-                --prefer-index=false \
-                --tag "$target" \
-                "$image"
+              # 单平台兼容模式，经 Docker Engine 重新推送普通镜像
+              docker pull "$image"
+              docker tag "$image" "$target"
+              docker push "$target"
 
               echo "Synced: $target"
               continue
             fi
 
-            # 去掉源镜像的 tag 或 digest，只保留仓库名。
+            # 去掉源镜像的 tag 或 digest，只保留仓库名
             source_repo="${image%@*}"
             source_last="${source_repo##*/}"
             [[ "$source_last" == *:* ]] && source_repo="${source_repo%:*}"
 
-            # 拆分目标仓库名和标签；未指定标签时使用 latest。
+            # 拆分目标仓库名和标签，未指定标签时使用 latest
             target_last="${target##*/}"
             if [[ "$target_last" == *:* ]]; then
               target_repo="${target%:*}"
@@ -73,7 +81,7 @@ jobs:
               target="${target_repo}:${target_tag}"
             fi
 
-            # 只保留真实运行平台，排除 unknown/unknown 和 attestation。
+            # 只保留真实运行平台，排除 unknown/unknown 和 attestation
             mapfile -t entries < <(
               jq -r '
                 .manifests[]
@@ -110,7 +118,7 @@ jobs:
             for entry in "${entries[@]}"; do
               IFS=$'\t' read -r platform digest <<< "$entry"
 
-              # 例如 linux/arm/v7 使用 arm-v7 作为平台标签后缀。
+              # 例如 linux/arm/v7 使用 arm-v7 作为平台标签后缀
               suffix="${platform#*/}"
               suffix="${suffix//\//-}"
 
@@ -119,7 +127,7 @@ jobs:
 
               echo "  Copy platform: $platform"
 
-              # Docker Engine 只推送运行镜像，不复制 OCI attestation。
+              # Docker Engine 只推送运行镜像，不复制 OCI attestation
               docker pull --platform "$platform" "$source_ref"
               docker tag "$source_ref" "$platform_target"
               docker push --platform "$platform" "$platform_target"
@@ -129,15 +137,15 @@ jobs:
             done
 
             if [ "${#platform_refs[@]}" -eq 1 ]; then
-              # 只有一个真实平台时，直接使用正式标签。
+              # 只有一个真实平台时，直接使用正式标签
               docker tag "${platform_refs[0]}" "$target"
               docker push --platform "${platform_names[0]}" "$target"
             else
-              # 根据纯单平台镜像重新生成不含 attestation 的 manifest list。
+              # 根据纯单平台镜像重新生成不含 attestation 的 manifest list
               docker manifest rm "$target" >/dev/null 2>&1 || true
               docker manifest create "$target" "${platform_refs[@]}"
 
-              # 明确写入各 manifest 的平台信息，包括 arm variant。
+              # 明确写入各 manifest 的平台信息，包括 arm variant
               for i in "${!platform_refs[@]}"; do
                 IFS='/' read -r os arch variant <<< "${platform_names[$i]}"
                 annotate_args=(--os "$os" --arch "$arch")
