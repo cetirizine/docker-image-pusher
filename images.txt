@@ -1,1 +1,1 @@
-homeassistant/home-assistant:2026.9.3
+nickrunning/wechat-selkies:0.0.16
