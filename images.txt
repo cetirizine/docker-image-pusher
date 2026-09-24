@@ -1,1 +1,2 @@
-nickrunning/wechat-selkies:0.0.16
+diygod/rsshub:chromium-bundled-2026-09-24
+diygod/rsshub:2026-09-24
