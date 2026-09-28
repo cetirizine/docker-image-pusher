@@ -1,2 +1,1 @@
-diygod/rsshub:chromium-bundled-2026-09-27
-diygod/rsshub:2026-09-27
+caddy:2.11.4-builder-alpine
