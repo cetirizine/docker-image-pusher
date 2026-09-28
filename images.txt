@@ -1,1 +1,1 @@
-caddy:2.11.4-builder-alpine
+prom/prometheus:v3.15.0
