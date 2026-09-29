@@ -1,3 +1,1 @@
-prom/snmp-exporter:v0.30.1
-prom/alertmanager:v0.34.1
-grafana/grafana:13.2.2-slim
+caddy:2.11.4-builder-alpine
