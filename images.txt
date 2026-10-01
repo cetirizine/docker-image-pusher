@@ -1,1 +1,1 @@
-authelia/authelia:4.39.28
+louislam/uptime-kuma:2.5.5-slim
