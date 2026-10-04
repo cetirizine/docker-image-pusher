@@ -1,2 +1,1 @@
-henrygd/beszel:0.20.0
-henrygd/beszel-agent:0.20.0
+p3terx/aria2-pro:202209060423
